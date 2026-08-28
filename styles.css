@@ -499,6 +499,7 @@ select.beads-prop-input {
 	gap: 6px;
 }
 .beads-graph-canvas {
+	position: relative; /* anchors the popup's absolute left/top */
 	flex: 1;
 	min-height: 0;
 	width: 100%;
@@ -595,4 +596,44 @@ select.beads-prop-input {
 }
 .beads-epic-chip-closed {
 	color: var(--text-faint);
+}
+
+/* Graph node-detail popover */
+.beads-graph-popup {
+	position: absolute;
+	z-index: 5;
+	width: 280px;
+	max-width: calc(100% - 24px);
+	max-height: calc(100% - 24px);
+	overflow-y: auto;
+	padding: 10px 12px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	/* Anchored at the click point; nudge up-left so the cursor lands inside it
+	   rather than at its corner, and keep it on-screen near pane edges. */
+	transform: translate(-12px, -12px);
+}
+.beads-graph-popup-head {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-2);
+}
+.beads-graph-popup-close {
+	flex: 0 0 auto;
+	font-size: 1.1em;
+	line-height: 1;
+}
+.beads-graph-popup-desc {
+	margin: 8px 0 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 160px;
+	overflow-y: auto;
+}
+.beads-graph-popup button.mod-cta {
+	width: 100%;
 }

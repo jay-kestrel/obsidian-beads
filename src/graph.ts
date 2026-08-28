@@ -4,8 +4,9 @@ import { join } from "path";
 import { instance as vizInstance } from "@viz-js/viz";
 import type BeadsPlugin from "./main";
 import { activeOptions } from "./settings";
-import { VIEW_TYPE_BEADS_GRAPH } from "./types";
-import { bdGraphDot, BdError, BdOptions } from "./bd";
+import { VIEW_TYPE_BEADS_GRAPH, BeadIssue } from "./types";
+import { bdGraphDot, bdShow, BdError, BdOptions } from "./bd";
+import { renderPriorityDot } from "./row";
 
 /**
  * Graphviz-as-WASM, loaded once per session.
@@ -83,6 +84,12 @@ export class BeadsGraphView extends ItemView {
 	private tx = 0;
 	private ty = 0;
 	private k = 1;
+
+	// The one node-detail popup, if a node is currently selected. `seq` guards
+	// against a slow bdShow() resolving after the user clicked a different node
+	// (or closed the popup) in the meantime.
+	private popupEl?: HTMLElement;
+	private popupSeq = 0;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -169,6 +176,8 @@ export class BeadsGraphView extends ItemView {
 		const root = this.contentEl;
 		root.empty();
 		this.zoomLayer = undefined;
+		this.popupEl = undefined;
+		this.popupSeq++; // invalidate any in-flight bdShow from before this re-render
 		root.addClass("beads-graph-pane");
 
 		const header = root.createDiv({ cls: "beads-graph-header" });
@@ -302,9 +311,77 @@ export class BeadsGraphView extends ItemView {
 			if (moved) return; // that was a pan, not a click
 			const target = e.target as Element | null;
 			const g = target?.closest?.("g.node");
-			if (!g) return;
+			if (!g) {
+				this.closePopup();
+				return;
+			}
 			const id = nodeId(g);
-			if (id) void this.plugin.openBead(id);
+			if (id) void this.showPopup(host, id, e.clientX, e.clientY);
 		});
+	}
+
+	private closePopup(): void {
+		this.popupSeq++; // invalidate any in-flight bdShow for the closed popup
+		this.popupEl?.remove();
+		this.popupEl = undefined;
+	}
+
+	/** Node click → fetch the full issue and show a small detail popover at the click point. */
+	private async showPopup(host: HTMLElement, id: string, clientX: number, clientY: number): Promise<void> {
+		this.closePopup();
+		const seq = ++this.popupSeq;
+		const opts = this.resolveOpts();
+
+		const rect = host.getBoundingClientRect();
+		const popup = host.createDiv({ cls: "beads-graph-popup" });
+		popup.style.left = `${clientX - rect.left}px`;
+		popup.style.top = `${clientY - rect.top}px`;
+		this.popupEl = popup;
+		popup.createDiv({ cls: "beads-empty", text: "Loading…" });
+
+		if (!opts) return; // shouldn't happen (the pane wouldn't have rendered a graph), but stay defensive
+
+		let issue: BeadIssue | null;
+		try {
+			issue = await bdShow(opts, id);
+		} catch (e) {
+			if (seq !== this.popupSeq) return;
+			popup.empty();
+			popup.createDiv({
+				cls: "beads-empty beads-error",
+				text: e instanceof BdError ? e.message : String(e),
+			});
+			return;
+		}
+		if (seq !== this.popupSeq) return; // superseded by a newer click/close
+		popup.empty();
+		if (!issue) {
+			popup.createDiv({ cls: "beads-empty", text: `${id} — not found (stale graph?)` });
+			return;
+		}
+
+		const head = popup.createDiv({ cls: "beads-graph-popup-head" });
+		renderPriorityDot(head, issue.priority ?? 2);
+		const main = head.createDiv({ cls: "beads-main" });
+		main.createDiv({ cls: "beads-title", text: issue.title });
+		const meta = main.createDiv({ cls: "beads-meta" });
+		meta.createSpan({ cls: "beads-id", text: issue.id });
+		meta.createSpan({ cls: "beads-status", text: issue.status });
+		const closeBtn = head.createEl("button", {
+			cls: "clickable-icon beads-graph-popup-close",
+			attr: { "aria-label": "Close" },
+		});
+		closeBtn.setText("×");
+		closeBtn.onclick = () => this.closePopup();
+
+		if (issue.description) {
+			popup.createDiv({ cls: "beads-graph-popup-desc", text: issue.description });
+		}
+
+		const openBtn = popup.createEl("button", { cls: "mod-cta", text: "Open" });
+		openBtn.onclick = () => {
+			this.closePopup();
+			void this.plugin.openBead(issue.id);
+		};
 	}
 }
