@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf } from "obsidian";
 import { existsSync } from "fs";
 import { join } from "path";
 import type BeadsPlugin from "./main";
+import { activeOptions } from "./settings";
 import { VIEW_TYPE_BEADS_GRAPH } from "./types";
 import { bdGraphHtml, BdError, BdOptions } from "./bd";
 import d3Source from "./vendor/d3.v7.min.txt";
@@ -72,10 +73,10 @@ export class BeadsGraphView extends ItemView {
 	}
 
 	private resolveOpts(): BdOptions | null {
-		const s = this.plugin.settings;
-		if (!s.projectRoot) return null;
-		if (!existsSync(join(s.projectRoot, ".beads"))) return null;
-		return { bdPath: s.bdPath, cwd: s.projectRoot };
+		const opts = activeOptions(this.plugin.settings);
+		if (!opts) return null;
+		if (!existsSync(join(opts.cwd, ".beads"))) return null;
+		return opts;
 	}
 
 	private async loadGraph(): Promise<void> {

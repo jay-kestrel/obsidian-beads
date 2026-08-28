@@ -1,4 +1,5 @@
 import type BeadsPlugin from "./main";
+import { activeOptions } from "./settings";
 import { BeadIssue } from "./types";
 import {
 	bdReadyCached,
@@ -119,15 +120,14 @@ export function registerBeadsCodeBlock(plugin: BeadsPlugin): void {
 		}
 		const cfg = parsed.config;
 
-		const s = plugin.settings;
-		if (!s.projectRoot) {
+		const opts: BdOptions | null = activeOptions(plugin.settings);
+		if (!opts) {
 			el.createDiv({
 				cls: "beads-embed-error",
-				text: "Beads: no project root set (Settings → Beads).",
+				text: "Beads: no project set (Settings → Beads).",
 			});
 			return;
 		}
-		const opts: BdOptions = { bdPath: s.bdPath, cwd: s.projectRoot };
 		const list = el.createDiv({ cls: "beads-embed-list" });
 
 		const render = async (): Promise<void> => {
