@@ -18,10 +18,39 @@
 	font-weight: var(--font-semibold);
 }
 
+/* Project switcher — takes the slot the static pane title used to occupy. */
+.beads-project-select {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: auto;
+	padding: 2px 22px 2px 6px;
+	background-color: transparent;
+	box-shadow: none;
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+	cursor: pointer;
+}
+.beads-project-select:hover {
+	background-color: var(--background-modifier-hover);
+}
+
 .beads-header-actions {
 	display: flex;
 	align-items: center;
 	gap: 2px;
+	flex: 0 0 auto;
+}
+
+/* Settings tab: one row per configured project. */
+.beads-settings-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 4px 0 8px;
+}
+.beads-settings-project.is-active {
+	border-left: 2px solid var(--interactive-accent);
+	padding-left: 8px;
 }
 
 .beads-count {

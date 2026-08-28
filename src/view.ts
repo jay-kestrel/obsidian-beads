@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import { existsSync } from "fs";
 import { join } from "path";
 import type BeadsPlugin from "./main";
+import { activeOptions } from "./settings";
 import { BeadIssue, VIEW_TYPE_BEADS } from "./types";
 import { bdReady, bdBlocked, bdByStatus, bdStatusCounts, BdError, BdOptions } from "./bd";
 import { renderIssueRow } from "./row";
@@ -82,17 +83,17 @@ export class BeadsView extends ItemView {
 	}
 
 	private resolveOpts(): BdOptions | null {
-		const s = this.plugin.settings;
-		if (!s.projectRoot) {
+		const opts = activeOptions(this.plugin.settings);
+		if (!opts) {
 			this.baseState = "no-root";
 			return null;
 		}
-		if (!existsSync(join(s.projectRoot, ".beads"))) {
+		if (!existsSync(join(opts.cwd, ".beads"))) {
 			this.baseState = "no-db";
 			return null;
 		}
 		this.baseState = "ok";
-		return { bdPath: s.bdPath, cwd: s.projectRoot };
+		return opts;
 	}
 
 	/** Full refresh: re-count and re-load the active tab; drop cached tabs. */
@@ -187,6 +188,31 @@ export class BeadsView extends ItemView {
 
 	// --- render ---------------------------------------------------------
 
+	/**
+	 * Project switcher: takes the slot the static "Beads" title used to occupy,
+	 * so the pane always names the project it is showing. Falls back to the
+	 * plain title when nothing is configured yet.
+	 */
+	private renderProjectPicker(header: HTMLElement): void {
+		const s = this.plugin.settings;
+		if (s.projects.length === 0) {
+			header.createDiv({ cls: "beads-header-title", text: "Beads" });
+			return;
+		}
+		const select = header.createEl("select", {
+			cls: "dropdown beads-project-select",
+			attr: { "aria-label": "Active project" },
+		});
+		for (const project of s.projects) {
+			const option = select.createEl("option", {
+				value: project.id,
+				text: project.name || project.path || "(unnamed)",
+			});
+			option.selected = project.id === s.activeProjectId;
+		}
+		select.onchange = () => void this.plugin.setActiveProject(select.value);
+	}
+
 	private render(): void {
 		const root = this.contentEl;
 		root.empty();
@@ -194,7 +220,7 @@ export class BeadsView extends ItemView {
 
 		// Header
 		const header = root.createDiv({ cls: "beads-header" });
-		header.createDiv({ cls: "beads-header-title", text: "Beads" });
+		this.renderProjectPicker(header);
 		const actions = header.createDiv({ cls: "beads-header-actions" });
 		const captureBtn = actions.createEl("button", {
 			cls: "clickable-icon",
@@ -213,14 +239,14 @@ export class BeadsView extends ItemView {
 		if (this.baseState === "no-root") {
 			root.createDiv({
 				cls: "beads-empty",
-				text: "No project root set. Open Beads settings and point it at a directory containing .beads/.",
+				text: "No project set. Open Beads settings and add a project pointing at a directory containing .beads/.",
 			});
 			return;
 		}
 		if (this.baseState === "no-db") {
 			root.createDiv({
 				cls: "beads-empty",
-				text: "No bd database here — this folder has no .beads/. Check the project root in Beads settings.",
+				text: "No bd database here — this folder has no .beads/. Check the project path in Beads settings.",
 			});
 			return;
 		}

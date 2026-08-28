@@ -3,8 +3,11 @@ import { FSWatcher, watch, existsSync } from "fs";
 import { join } from "path";
 import {
 	BeadsSettings,
-	DEFAULT_SETTINGS,
 	BeadsSettingTab,
+	activeProject,
+	activeOptions,
+	makeProject,
+	migrateSettings,
 } from "./settings";
 import { BeadsView } from "./view";
 import { BeadEditorView } from "./editor";
@@ -87,13 +90,15 @@ export default class BeadsPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const data = (await this.loadData()) as Partial<BeadsSettings> | null;
-		this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
+		const data = (await this.loadData()) as Parameters<
+			typeof migrateSettings
+		>[0];
+		this.settings = migrateSettings(data);
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
-		// Re-point the filesystem watcher if the project root changed.
+		// Re-point the filesystem watcher if the active project changed.
 		this.restartWatch();
 	}
 
@@ -183,33 +188,53 @@ export default class BeadsPlugin extends Plugin {
 	}
 
 	/**
-	 * Auto-fill the project root on first load: if it's unset and the vault
-	 * folder itself contains a `.beads/`, use that. Never overwrite a root the
-	 * user set by hand.
+	 * Auto-fill the first project on first load: if no projects are configured
+	 * and the vault folder itself contains a `.beads/`, seed one from it. Never
+	 * touches a project list the user has already set up.
 	 */
 	private detectRoot(): void {
-		if (this.settings.projectRoot) return;
+		if (this.settings.projects.length > 0) return;
 		const adapter = this.app.vault.adapter;
 		if (adapter instanceof FileSystemAdapter) {
 			const base = adapter.getBasePath();
 			if (existsSync(join(base, ".beads"))) {
-				this.settings.projectRoot = base;
+				const project = makeProject(base);
+				this.settings.projects = [project];
+				this.settings.activeProjectId = project.id;
 				void this.saveSettings();
 			}
 		}
 	}
 
-	/** Ambient "● N ready" in the status bar (works even with the pane closed). */
+	/**
+	 * Switch which project every surface reads from. Only one project is live at
+	 * a time — the pane, watcher and status bar all follow this pointer.
+	 */
+	async setActiveProject(id: string): Promise<void> {
+		if (this.settings.activeProjectId === id) return;
+		if (!this.settings.projects.some((p) => p.id === id)) return;
+		this.settings.activeProjectId = id;
+		await this.saveSettings();
+		invalidateReadCache();
+		this.refreshViews();
+	}
+
+	/**
+	 * Ambient "● N ready" in the status bar (works even with the pane closed).
+	 * Reports the ACTIVE project only — an aggregate across projects would be
+	 * both ambiguous (which repo is the number about?) and N subprocess spawns
+	 * per refresh tick.
+	 */
 	updateStatusBar(): void {
 		if (!this.statusBarEl) return;
-		const s = this.settings;
-		if (!s.projectRoot) {
+		const opts = activeOptions(this.settings);
+		if (!opts) {
 			this.statusBarEl.setText("");
 			return;
 		}
 		// Drop stale results: only the latest request may write the count.
 		const my = ++this.statusSeq;
-		void bdReadyCount({ bdPath: s.bdPath, cwd: s.projectRoot })
+		void bdReadyCount(opts)
 			.then((n) => {
 				if (my === this.statusSeq) this.statusBarEl?.setText(`● ${n} ready`);
 			})
@@ -233,9 +258,13 @@ export default class BeadsPlugin extends Plugin {
 		}
 	}
 
-	/** Watch the `.beads` directory so external `bd` writes refresh the pane. */
+	/**
+	 * Watch the `.beads` directory so external `bd` writes refresh the pane.
+	 * Only the ACTIVE project is watched: the pane can only show one project at
+	 * a time, so a change in an inactive one has nothing on screen to refresh.
+	 */
 	restartWatch(): void {
-		const root = this.settings.projectRoot;
+		const root = activeProject(this.settings)?.path ?? "";
 		if (root === this.watchedRoot && this.watcher) return;
 		this.stopWatch();
 		this.watchedRoot = root;
