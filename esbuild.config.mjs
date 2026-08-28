@@ -18,6 +18,9 @@ const context = await esbuild.context({
   banner: { js: banner },
   entryPoints: ["src/main.ts"],
   bundle: true,
+  // Vendored D3 build (src/vendor/d3.v7.min.txt) is inlined as a raw string —
+  // Obsidian's CSP blocks the CDN <script src> bd's --html output ships with.
+  loader: { ".txt": "text" },
   external: [
     "obsidian",
     "electron",

@@ -263,6 +263,7 @@ export class BeadsView extends ItemView {
 			renderIssueRow(list, issue, {
 				onOpen: (i) => this.openBead(i),
 				showDeps: this.active === "blocked",
+				onGraph: (i) => void this.plugin.openGraph({ id: i.id }),
 			});
 		}
 

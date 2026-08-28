@@ -8,7 +8,8 @@ import {
 } from "./settings";
 import { BeadsView } from "./view";
 import { BeadEditorView } from "./editor";
-import { VIEW_TYPE_BEADS, VIEW_TYPE_BEADS_EDITOR } from "./types";
+import { BeadsGraphView, GraphState } from "./graph";
+import { VIEW_TYPE_BEADS, VIEW_TYPE_BEADS_EDITOR, VIEW_TYPE_BEADS_GRAPH } from "./types";
 import { bdReadyCount, invalidateReadCache } from "./bd";
 import { registerBeadsCodeBlock } from "./codeblock";
 
@@ -36,6 +37,11 @@ export default class BeadsPlugin extends Plugin {
 			(leaf) => new BeadEditorView(leaf, this),
 		);
 
+		this.registerView(
+			VIEW_TYPE_BEADS_GRAPH,
+			(leaf) => new BeadsGraphView(leaf, this),
+		);
+
 		this.addRibbonIcon("list-checks", "Open Beads pane", () => {
 			void this.activateView();
 		});
@@ -56,6 +62,12 @@ export default class BeadsPlugin extends Plugin {
 			id: "refresh",
 			name: "Refresh pane",
 			callback: () => this.refreshViews(),
+		});
+
+		this.addCommand({
+			id: "open-graph-all",
+			name: "Open dependency graph (all issues)",
+			callback: () => void this.openGraph({ all: true }),
 		});
 
 		this.addSettingTab(new BeadsSettingTab(this.app, this));
@@ -121,6 +133,28 @@ export default class BeadsPlugin extends Plugin {
 			type: VIEW_TYPE_BEADS_EDITOR,
 			active: true,
 			state: { id },
+		});
+		await workspace.revealLeaf(leaf);
+	}
+
+	/**
+	 * Open (or reveal) a dependency-graph tab for one epic/issue, or the whole
+	 * repo (`{ all: true }`). One tab per distinct scope, same as `openBead`.
+	 */
+	async openGraph(state: GraphState): Promise<void> {
+		const { workspace } = this.app;
+		for (const leaf of workspace.getLeavesOfType(VIEW_TYPE_BEADS_GRAPH)) {
+			const s = leaf.getViewState().state as GraphState | undefined;
+			if (!!s?.all === !!state.all && s?.id === state.id) {
+				await workspace.revealLeaf(leaf);
+				return;
+			}
+		}
+		const leaf = workspace.getLeaf("tab");
+		await leaf.setViewState({
+			type: VIEW_TYPE_BEADS_GRAPH,
+			active: true,
+			state: state as Record<string, unknown>,
 		});
 		await workspace.revealLeaf(leaf);
 	}

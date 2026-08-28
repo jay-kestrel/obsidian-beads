@@ -1,5 +1,6 @@
 export const VIEW_TYPE_BEADS = "beads-pane";
 export const VIEW_TYPE_BEADS_EDITOR = "beads-editor";
+export const VIEW_TYPE_BEADS_GRAPH = "beads-graph";
 
 /** Common issue types offered in the capture / edit dropdowns. */
 export const ISSUE_TYPES = [

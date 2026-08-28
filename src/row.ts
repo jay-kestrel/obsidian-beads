@@ -1,3 +1,4 @@
+import { setIcon } from "obsidian";
 import { BeadIssue } from "./types";
 
 const PRIORITY_NAME: Record<number, string> = {
@@ -13,6 +14,8 @@ export interface RowHandlers {
 	onOpen: (issue: BeadIssue) => void;
 	/** Show a "⛓ n" dependency-count hint (blocked list only). */
 	showDeps?: boolean;
+	/** Epic rows only: click-through to that epic's dependency graph. */
+	onGraph?: (issue: BeadIssue) => void;
 }
 
 /** A small colored priority dot (native-restrained) with the label on hover. */
@@ -52,6 +55,18 @@ export function renderIssueRow(
 			cls: "beads-deps",
 			text: `⛓ ${issue.dependency_count}`,
 		});
+	}
+
+	if (handlers.onGraph && issue.issue_type === "epic") {
+		const graphBtn = row.createEl("button", {
+			cls: "clickable-icon beads-graph-btn",
+			attr: { "aria-label": "View dependency graph" },
+		});
+		setIcon(graphBtn, "git-fork");
+		graphBtn.onclick = (e) => {
+			e.stopPropagation();
+			handlers.onGraph?.(issue);
+		};
 	}
 
 	row.onclick = () => handlers.onOpen(issue);

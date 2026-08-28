@@ -393,6 +393,28 @@ export async function bdComments(
 	}
 }
 
+// `bd graph --html --all` lays out every issue in the repo, which can take a
+// while on a large graph (observed >2min on a ~150-issue repo) — give it a
+// much longer budget than the default 15s instead of failing fast.
+const GRAPH_TIMEOUT_MS = 120_000;
+
+/**
+ * `bd graph --html [--all] [-- id]` — bd's own self-contained, interactive D3
+ * dependency graph as an HTML string. `id` scopes to one issue/epic (fast);
+ * `all` lays out the whole repo (can be slow — see GRAPH_TIMEOUT_MS). Not
+ * cached: a graph render is a deliberate, occasional action, not a hot path.
+ */
+export async function bdGraphHtml(
+	opts: BdOptions,
+	target: { id?: string; all?: boolean },
+): Promise<string> {
+	const args = ["graph", "--html"];
+	if (target.all) args.push("--all");
+	if (target.id) args.push("--", target.id);
+	const { stdout } = await run(args, { ...opts, timeoutMs: GRAPH_TIMEOUT_MS });
+	return stdout;
+}
+
 /** Cheap probe used to validate settings: `bd --version`. */
 export async function bdVersion(opts: BdOptions): Promise<string> {
 	const { stdout } = await run(["--version"], { ...opts, timeoutMs: 5_000 });

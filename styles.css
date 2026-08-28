@@ -446,3 +446,27 @@ select.beads-prop-input {
 .beads-statusbar {
 	color: var(--text-muted);
 }
+
+/* Dependency graph tab */
+.beads-graph-pane {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
+}
+.beads-graph-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.beads-graph-title {
+	font-weight: var(--font-semibold);
+}
+.beads-graph-frame {
+	flex: 1;
+	width: 100%;
+	border: none;
+}
