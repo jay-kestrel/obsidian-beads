@@ -526,3 +526,73 @@ select.beads-prop-input {
 	stroke: var(--interactive-accent);
 	stroke-width: 2;
 }
+
+/* Epics tab — an epic header that expands in place into its own children. */
+.beads-epic {
+	display: flex;
+	flex-direction: column;
+}
+.beads-epic-head {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-1);
+	padding: var(--size-4-1) var(--size-4-2);
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+.beads-epic-head:hover {
+	background: var(--background-modifier-hover);
+}
+.beads-epic-head.is-expanded .beads-title {
+	font-weight: var(--font-semibold);
+}
+.beads-epic-chevron {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	height: 18px;
+	color: var(--text-faint);
+}
+.beads-epic-chevron svg {
+	width: 14px;
+	height: 14px;
+}
+.beads-epic-progress-text {
+	color: var(--text-muted);
+}
+.beads-epic-eligible {
+	color: var(--color-green);
+}
+.beads-epic-bar {
+	height: 3px;
+	margin-top: 5px;
+	border-radius: 2px;
+	background: var(--background-modifier-border);
+	overflow: hidden;
+}
+.beads-epic-bar-fill {
+	height: 100%;
+	border-radius: 2px;
+	background: var(--text-accent);
+}
+
+/* Children are indented under their epic, with a hairline spine. */
+.beads-epic-children {
+	margin: 2px 0 8px var(--size-4-4);
+	padding-left: var(--size-4-2);
+	border-left: 1px solid var(--background-modifier-border);
+}
+.beads-epic-rollup {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	padding: 2px var(--size-4-2) 6px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+.beads-epic-chip-in_progress {
+	color: var(--text-accent);
+}
+.beads-epic-chip-closed {
+	color: var(--text-faint);
+}

@@ -248,6 +248,48 @@ export async function bdDepList(
 	return parseIssues(stdout);
 }
 
+/**
+ * One entry of `bd epic status --json`: the epic issue plus bd's own rollup.
+ * bd only rolls up *closed vs total* — there is no per-status breakdown here,
+ * so the finer open/in-progress split is derived from `bdChildren` on expand.
+ */
+export interface BdEpicStatus {
+	epic: BeadIssue;
+	total_children: number;
+	closed_children: number;
+	eligible_for_close: boolean;
+}
+
+/**
+ * `bd epic status --json` — every open epic with bd's child rollup, in ONE
+ * call. bd computes `total_children`/`closed_children`; we never walk the
+ * parent-child edges ourselves to re-derive them. Closed epics are not listed.
+ */
+export async function bdEpicStatus(opts: BdOptions): Promise<BdEpicStatus[]> {
+	const { stdout } = await run(["epic", "status", "--json"], opts);
+	const trimmed = stdout.trim();
+	if (!trimmed) return [];
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		return Array.isArray(parsed) ? (parsed as BdEpicStatus[]) : [];
+	} catch (e) {
+		throw new BdError(`Could not parse bd epic status JSON: ${String(e)}`);
+	}
+}
+
+/**
+ * `bd children --json -- <id>` — the direct children of a parent bead. bd's
+ * own alias for `list --parent <id> --status all`, so closed children are
+ * included (that's the point: the drilldown shows the whole epic).
+ */
+export async function bdChildren(
+	opts: BdOptions,
+	id: string,
+): Promise<BeadIssue[]> {
+	const { stdout } = await run(["children", "--json", "--", id], opts);
+	return parseIssues(stdout);
+}
+
 // --- Code-block reads (cached, clamped, serialized) ----------------------
 
 export async function bdReadyCached(

@@ -4,19 +4,34 @@ import { join } from "path";
 import type BeadsPlugin from "./main";
 import { activeOptions } from "./settings";
 import { BeadIssue, VIEW_TYPE_BEADS } from "./types";
-import { bdReady, bdBlocked, bdByStatus, bdStatusCounts, BdError, BdOptions } from "./bd";
+import {
+	bdReady,
+	bdBlocked,
+	bdByStatus,
+	bdChildren,
+	bdEpicStatus,
+	bdStatusCounts,
+	BdError,
+	BdOptions,
+} from "./bd";
 import { renderIssueRow } from "./row";
+import { EpicsState, emptyEpicsState, renderEpics } from "./epics";
 
 interface TabDef {
 	key: string;
 	label: string;
-	countKey: string;
+	/** Key in `bd status --json`'s summary block; omitted = no count badge. */
+	countKey?: string;
 }
+
+/** The Epics tab is state-shaped differently (see EpicsState) — special-cased. */
+const EPICS_TAB = "epics";
 
 const TABS: TabDef[] = [
 	{ key: "ready", label: "Ready", countKey: "ready_issues" },
 	{ key: "in_progress", label: "In progress", countKey: "in_progress_issues" },
 	{ key: "blocked", label: "Blocked", countKey: "blocked_issues" },
+	{ key: EPICS_TAB, label: "Epics" },
 	{ key: "closed", label: "Closed", countKey: "closed_issues" },
 ];
 const PAGE = 25;
@@ -48,6 +63,7 @@ export class BeadsView extends ItemView {
 	private active = "ready";
 	private counts: Record<string, number> = {};
 	private tabs: Record<string, TabState> = {};
+	private epics: EpicsState = emptyEpicsState();
 	private baseState: "ok" | "no-root" | "no-db" = "no-root";
 	private loadSeq = 0;
 
@@ -80,6 +96,14 @@ export class BeadsView extends ItemView {
 
 	async onClose(): Promise<void> {
 		for (const t of TABS) this.tabs[t.key] = this.emptyTab();
+		this.epics = emptyEpicsState();
+	}
+
+	/** Whether the active tab has an in-flight load (drives the spinner). */
+	private isLoading(): boolean {
+		return this.active === EPICS_TAB
+			? this.epics.loading
+			: this.tabs[this.active].loading;
 	}
 
 	private resolveOpts(): BdOptions | null {
@@ -102,6 +126,10 @@ export class BeadsView extends ItemView {
 			this.tabs[t.key].loaded = false;
 			this.tabs[t.key].limit = PAGE;
 		}
+		// Keep which epics are open across a refresh; drop their cached children
+		// so an expanded epic re-reads from bd instead of showing stale rows.
+		this.epics.loaded = false;
+		this.epics.children = {};
 		const opts = this.resolveOpts();
 		if (!opts) {
 			this.render();
@@ -136,7 +164,76 @@ export class BeadsView extends ItemView {
 		}
 	}
 
+	/**
+	 * `bd epic status --json` in one call — bd already knows every epic and its
+	 * closed/total child rollup, so nothing is recomputed here. Children are
+	 * fetched separately, only for epics the user actually expands.
+	 */
+	private async loadEpics(seq?: number): Promise<void> {
+		const opts = this.resolveOpts();
+		if (!opts) {
+			this.render();
+			return;
+		}
+		const mySeq = seq ?? ++this.loadSeq;
+		this.epics.loading = true;
+		this.epics.error = undefined;
+		this.render();
+		try {
+			const entries = await bdEpicStatus(opts);
+			if (mySeq !== this.loadSeq) return;
+			this.epics.epics = entries;
+			this.epics.loaded = true;
+			// Re-fill children for epics that were left expanded by a refresh.
+			for (const id of this.epics.expanded) {
+				if (!this.epics.children[id]) void this.loadChildren(id, mySeq);
+			}
+		} catch (e) {
+			if (mySeq !== this.loadSeq) return;
+			this.epics.error = e instanceof BdError ? e.message : String(e);
+		} finally {
+			if (mySeq === this.loadSeq) {
+				this.epics.loading = false;
+				this.render();
+			}
+		}
+	}
+
+	/** `bd children --json -- <id>` for one epic, cached until the next refresh. */
+	private async loadChildren(id: string, seq: number): Promise<void> {
+		const opts = this.resolveOpts();
+		if (!opts || this.epics.loadingChildren.has(id)) return;
+		this.epics.loadingChildren.add(id);
+		this.render();
+		try {
+			const children = await bdChildren(opts, id);
+			if (seq !== this.loadSeq) return;
+			this.epics.children[id] = children;
+		} catch (e) {
+			if (seq !== this.loadSeq) return;
+			this.epics.error = e instanceof BdError ? e.message : String(e);
+		} finally {
+			this.epics.loadingChildren.delete(id);
+			if (seq === this.loadSeq) this.render();
+		}
+	}
+
+	private toggleEpic(id: string): void {
+		if (this.epics.expanded.has(id)) {
+			this.epics.expanded.delete(id);
+			this.render();
+			return;
+		}
+		this.epics.expanded.add(id);
+		if (this.epics.children[id]) this.render(); // cached → instant
+		else void this.loadChildren(id, this.loadSeq);
+	}
+
 	private async loadTab(key: string, seq?: number): Promise<void> {
+		if (key === EPICS_TAB) {
+			await this.loadEpics(seq);
+			return;
+		}
 		const opts = this.resolveOpts();
 		if (!opts) {
 			this.render();
@@ -173,7 +270,8 @@ export class BeadsView extends ItemView {
 	private async switchTab(key: string): Promise<void> {
 		if (this.active === key) return;
 		this.active = key;
-		if (this.tabs[key].loaded) this.render(); // cached → instant
+		const loaded = key === EPICS_TAB ? this.epics.loaded : this.tabs[key].loaded;
+		if (loaded) this.render(); // cached → instant
 		else await this.loadTab(key);
 	}
 
@@ -233,7 +331,7 @@ export class BeadsView extends ItemView {
 			attr: { "aria-label": "Refresh" },
 		});
 		setIcon(refreshBtn, "refresh-cw");
-		refreshBtn.toggleClass("beads-spin", this.tabs[this.active].loading);
+		refreshBtn.toggleClass("beads-spin", this.isLoading());
 		refreshBtn.onclick = () => void this.refresh();
 
 		if (this.baseState === "no-root") {
@@ -257,7 +355,7 @@ export class BeadsView extends ItemView {
 			const btn = tabBar.createEl("button", { cls: "beads-tab" });
 			btn.toggleClass("is-active", t.key === this.active);
 			btn.createSpan({ text: t.label });
-			const n = this.counts[t.countKey];
+			const n = t.countKey ? this.counts[t.countKey] : undefined;
 			if (typeof n === "number") {
 				btn.createSpan({ cls: "beads-tab-count", text: String(n) });
 			}
@@ -266,6 +364,16 @@ export class BeadsView extends ItemView {
 
 		// Active tab content
 		const body = root.createDiv({ cls: "beads-tab-body" });
+
+		if (this.active === EPICS_TAB) {
+			renderEpics(body, this.epics, {
+				onToggle: (id) => this.toggleEpic(id),
+				onOpen: (i) => this.openBead(i),
+				onGraph: (i) => void this.plugin.openGraph({ id: i.id }),
+			});
+			return;
+		}
+
 		const tab = this.tabs[this.active];
 
 		if (tab.error) {
