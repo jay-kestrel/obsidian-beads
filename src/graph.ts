@@ -1,43 +1,87 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import { existsSync } from "fs";
 import { join } from "path";
+import { instance as vizInstance } from "@viz-js/viz";
 import type BeadsPlugin from "./main";
 import { VIEW_TYPE_BEADS_GRAPH } from "./types";
-import { bdGraphHtml, BdError, BdOptions } from "./bd";
-import d3Source from "./vendor/d3.v7.min.txt";
+import { bdGraphDot, BdError, BdOptions } from "./bd";
 
-// bd's --html output loads D3 from `https://d3js.org` — Obsidian's CSP blocks
-// that script-src inside the sandboxed iframe, which silently kills the
-// visualization's JS (no colors, no drag/zoom/click). Swap it for the
-// vendored copy inlined at build time so the graph works with no network call.
-const D3_SCRIPT_TAG = /<script[^>]*\ssrc=["']https:\/\/d3js\.org\/[^"']*["'][^>]*><\/script>/;
-
-function inlineD3(html: string): string {
-	if (!D3_SCRIPT_TAG.test(html)) return html; // bd changed its template — degrade to CDN behavior rather than break
-	// Replacer must be a FUNCTION: a string replacement arg gives special
-	// meaning to `$&`, `$'`, `` $` ``, `$1`... and D3's minified source
-	// contains `$`-sequences that would otherwise get expanded, corrupting
-	// the inlined script (this is what caused the earlier blank/broken page).
-	return html.replace(D3_SCRIPT_TAG, () => `<script>${d3Source}</script>`);
+/**
+ * Graphviz-as-WASM, loaded once per session.
+ *
+ * `@viz-js/viz` embeds the Graphviz WASM binary *inside* its JS bundle, so
+ * esbuild bundles the whole engine into main.js and nothing is ever fetched at
+ * runtime — the same offline/CSP-safe constraint that forced D3 to be vendored.
+ * (@hpcc-js/wasm-graphviz resolves a separate `.wasm` asset, and d3-graphviz
+ * layers a full d3 dependency on top of it; neither buys us anything here.)
+ */
+let vizPromise: ReturnType<typeof vizInstance> | undefined;
+function getViz(): ReturnType<typeof vizInstance> {
+	if (!vizPromise) vizPromise = vizInstance();
+	return vizPromise;
 }
+
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 20;
+const ZOOM_LAYER_CLASS = "beads-graph-zoom";
+/** Pointer travel (px) past which a press counts as a pan, not a node click. */
+const CLICK_SLOP_PX = 4;
 
 export interface GraphState {
 	id?: string;
 	all?: boolean;
 }
 
+/** Strip anything active out of the engine's SVG before it touches the DOM. */
+function sanitize(svg: SVGSVGElement): void {
+	for (const el of Array.from(svg.querySelectorAll("script, foreignObject"))) {
+		el.remove();
+	}
+	// Issue titles flow into DOT labels, so treat the rendered SVG as untrusted:
+	// drop event handlers and every link target (we never need one — clicks are
+	// handled by our own listener).
+	for (const el of Array.from(svg.querySelectorAll("*"))) {
+		for (const attr of Array.from(el.attributes)) {
+			const name = attr.name.toLowerCase();
+			if (name.startsWith("on") || name === "href" || name === "xlink:href") {
+				el.removeAttribute(attr.name);
+			}
+		}
+	}
+}
+
+/** The bd issue id of a Graphviz `g.node`, which DOT emits as its `<title>`. */
+function nodeId(g: Element): string | undefined {
+	return g.querySelector("title")?.textContent?.trim() || undefined;
+}
+
 /**
- * Renders bd's own dependency graph (`bd graph --html`, a self-contained D3
- * visualization) inside a sandboxed iframe. bd does the layout and rendering;
- * this view is just a shell with a scope label and a refresh button — no
- * graph-drawing code lives here.
+ * Dependency-graph tab.
+ *
+ * bd's `--dot` output is the same clean, layered DAG as its terminal view (a
+ * `rank=same` sub-graph per dependency layer, bd's status colours per node), so
+ * we let Graphviz do the layout — via a bundled WASM build — and render the
+ * resulting SVG straight into the pane. That replaces bd's `--html` output,
+ * whose force-directed D3 layout collapses into an unreadable hairball past a
+ * few dozen nodes.
+ *
+ * The SVG lives in the pane's own DOM (no iframe) so a node click can call
+ * `plugin.openBead()` directly; see `sanitize()` for what that costs us.
  */
 export class BeadsGraphView extends ItemView {
 	private state: GraphState = {};
 	private loading = false;
 	private error?: string;
-	private html?: string;
+	private dot?: string;
 	private loadSeq = 0;
+
+	// Pan/zoom state, in the SVG's own user units. Applied to a wrapper <g> we
+	// insert around Graphviz's output, so the root <svg>/viewBox stays put and
+	// screen->user conversion below is always against an unchanging CTM.
+	private zoomLayer?: SVGGElement;
+	private tx = 0;
+	private ty = 0;
+	private k = 1;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -82,7 +126,7 @@ export class BeadsGraphView extends ItemView {
 		const opts = this.resolveOpts();
 		if (!opts) {
 			this.error = "No project root / .beads database configured (Settings → Beads).";
-			this.html = undefined;
+			this.dot = undefined;
 			this.render();
 			return;
 		}
@@ -91,9 +135,10 @@ export class BeadsGraphView extends ItemView {
 		this.error = undefined;
 		this.render();
 		try {
-			const html = await bdGraphHtml(opts, { id: this.state.id, all: this.state.all });
+			const dot = await bdGraphDot(opts, { id: this.state.id, all: this.state.all });
 			if (seq !== this.loadSeq) return;
-			this.html = inlineD3(html);
+			this.dot = dot;
+			this.resetZoom(); // a new graph starts fitted, not wherever the last one was panned to
 		} catch (e) {
 			if (seq !== this.loadSeq) return;
 			this.error = e instanceof BdError ? e.message : String(e);
@@ -105,9 +150,24 @@ export class BeadsGraphView extends ItemView {
 		}
 	}
 
+	private resetZoom(): void {
+		this.tx = 0;
+		this.ty = 0;
+		this.k = 1;
+		this.applyTransform();
+	}
+
+	private applyTransform(): void {
+		this.zoomLayer?.setAttribute(
+			"transform",
+			`translate(${this.tx} ${this.ty}) scale(${this.k})`,
+		);
+	}
+
 	private render(): void {
 		const root = this.contentEl;
 		root.empty();
+		this.zoomLayer = undefined;
 		root.addClass("beads-graph-pane");
 
 		const header = root.createDiv({ cls: "beads-graph-header" });
@@ -115,7 +175,10 @@ export class BeadsGraphView extends ItemView {
 			cls: "beads-graph-title",
 			text: this.state.all ? "All issues" : (this.state.id ?? "Beads graph"),
 		});
-		const refresh = header.createEl("button", {
+		const buttons = header.createDiv({ cls: "beads-graph-actions" });
+		const fit = buttons.createEl("button", { text: "Reset zoom" });
+		fit.onclick = () => this.resetZoom();
+		const refresh = buttons.createEl("button", {
 			text: this.loading ? "Loading…" : "Refresh",
 		});
 		refresh.disabled = this.loading;
@@ -125,21 +188,122 @@ export class BeadsGraphView extends ItemView {
 			root.createDiv({ cls: "beads-empty beads-error", text: this.error });
 			return;
 		}
-		if (this.loading && !this.html) {
+		if (this.loading && !this.dot) {
 			root.createDiv({
 				cls: "beads-empty",
 				text: this.state.all ? "Building graph — this can take a while for the whole repo…" : "Building graph…",
 			});
 			return;
 		}
-		if (!this.html) return;
+		if (!this.dot) return;
 
-		// Sandboxed with scripts allowed (bd's D3 code needs to run) but no
-		// allow-same-origin, so the iframe can never reach the Obsidian app,
-		// the vault, or Node — it only ever renders bd's own static HTML
-		// (D3 is inlined, see inlineD3 above — no network call needed).
-		const iframe = root.createEl("iframe", { cls: "beads-graph-frame" });
-		iframe.setAttribute("sandbox", "allow-scripts");
-		iframe.srcdoc = this.html;
+		const canvas = root.createDiv({ cls: "beads-graph-canvas" });
+		void this.drawInto(canvas, this.dot);
+	}
+
+	/** Lay the DOT out with Graphviz and mount the SVG. Async: the first call waits on the WASM engine. */
+	private async drawInto(canvas: HTMLElement, dot: string): Promise<void> {
+		const seq = this.loadSeq;
+		let markup: string;
+		try {
+			const viz = await getViz();
+			markup = viz.renderString(dot, { format: "svg" });
+		} catch (e) {
+			if (seq !== this.loadSeq || !canvas.isConnected) return;
+			canvas.createDiv({
+				cls: "beads-empty beads-error",
+				text: `Could not lay out the graph: ${String(e)}`,
+			});
+			return;
+		}
+		if (seq !== this.loadSeq || !canvas.isConnected) return;
+
+		const doc = new DOMParser().parseFromString(markup, "image/svg+xml");
+		const svg = doc.documentElement as unknown as SVGSVGElement;
+		if (svg.tagName.toLowerCase() !== "svg") {
+			canvas.createDiv({ cls: "beads-empty beads-error", text: "Graphviz returned no SVG." });
+			return;
+		}
+		sanitize(svg);
+
+		// Fill the pane and let the viewBox Graphviz emitted do the initial fit.
+		svg.setAttribute("width", "100%");
+		svg.setAttribute("height", "100%");
+		svg.classList.add("beads-graph-svg");
+
+		const mounted = canvas.appendChild(document.importNode(svg, true));
+
+		// Re-parent Graphviz's content under a wrapper <g> that carries pan/zoom.
+		const layer = mounted.createSvg("g", { cls: ZOOM_LAYER_CLASS });
+		while (mounted.firstChild && mounted.firstChild !== layer) {
+			layer.appendChild(mounted.firstChild);
+		}
+		this.zoomLayer = layer;
+		this.applyTransform();
+
+		this.wire(canvas, mounted);
+	}
+
+	/** Screen coordinates → the root SVG's user units (unaffected by our pan/zoom). */
+	private toUser(svg: SVGSVGElement, x: number, y: number): { x: number; y: number } {
+		const ctm = svg.getScreenCTM();
+		if (!ctm) return { x, y };
+		const p = new DOMPoint(x, y).matrixTransform(ctm.inverse());
+		return { x: p.x, y: p.y };
+	}
+
+	// Listeners go on the containing HTMLElement (Obsidian's registerDomEvent
+	// only takes those, and these events all bubble); the <svg> is still what we
+	// measure against for screen->user coordinates.
+	private wire(host: HTMLElement, svg: SVGSVGElement): void {
+		this.registerDomEvent(host, "wheel", (e: WheelEvent) => {
+			e.preventDefault();
+			const p = this.toUser(svg, e.clientX, e.clientY);
+			const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, this.k * Math.exp(-e.deltaY * 0.002)));
+			const ratio = next / this.k;
+			// Keep the point under the cursor pinned while the scale changes.
+			this.tx = p.x - ratio * (p.x - this.tx);
+			this.ty = p.y - ratio * (p.y - this.ty);
+			this.k = next;
+			this.applyTransform();
+		});
+
+		let dragging = false;
+		let moved = false;
+		let last = { x: 0, y: 0 };
+		let downAt = { x: 0, y: 0 };
+		this.registerDomEvent(host, "pointerdown", (e: PointerEvent) => {
+			if (e.button !== 0) return;
+			dragging = true;
+			moved = false;
+			downAt = { x: e.clientX, y: e.clientY };
+			last = this.toUser(svg, e.clientX, e.clientY);
+			host.setPointerCapture(e.pointerId);
+		});
+		this.registerDomEvent(host, "pointermove", (e: PointerEvent) => {
+			if (!dragging) return;
+			if (Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > CLICK_SLOP_PX) moved = true;
+			const p = this.toUser(svg, e.clientX, e.clientY);
+			this.tx += p.x - last.x;
+			this.ty += p.y - last.y;
+			last = p;
+			this.applyTransform();
+		});
+		const endDrag = (e: PointerEvent) => {
+			if (!dragging) return;
+			dragging = false;
+			if (host.hasPointerCapture(e.pointerId)) host.releasePointerCapture(e.pointerId);
+		};
+		this.registerDomEvent(host, "pointerup", endDrag);
+		this.registerDomEvent(host, "pointercancel", endDrag);
+
+		this.registerDomEvent(host, "click", (e: MouseEvent) => {
+			if (moved) return; // that was a pan, not a click
+			const target = e.target as Element | null;
+			const g = target?.closest?.("g.node");
+			if (!g) return;
+			const id = nodeId(g);
+			if (id) void this.plugin.openBead(id);
+		});
 	}
 }

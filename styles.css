@@ -465,8 +465,35 @@ select.beads-prop-input {
 .beads-graph-title {
 	font-weight: var(--font-semibold);
 }
-.beads-graph-frame {
+.beads-graph-actions {
+	display: flex;
+	gap: 6px;
+}
+.beads-graph-canvas {
 	flex: 1;
+	min-height: 0;
 	width: 100%;
-	border: none;
+	overflow: hidden;
+	background: var(--background-primary);
+}
+.beads-graph-svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+	cursor: grab;
+	touch-action: none;
+}
+.beads-graph-svg:active {
+	cursor: grabbing;
+}
+/* Graphviz paints bd's status palette into each node; only the hit target and
+   the hover affordance are ours. */
+.beads-graph-svg g.node {
+	cursor: pointer;
+}
+.beads-graph-svg g.node:hover > polygon,
+.beads-graph-svg g.node:hover > ellipse,
+.beads-graph-svg g.node:hover > path {
+	stroke: var(--interactive-accent);
+	stroke-width: 2;
 }

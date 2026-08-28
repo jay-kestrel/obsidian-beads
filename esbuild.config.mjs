@@ -18,9 +18,10 @@ const context = await esbuild.context({
   banner: { js: banner },
   entryPoints: ["src/main.ts"],
   bundle: true,
-  // Vendored D3 build (src/vendor/d3.v7.min.txt) is inlined as a raw string —
-  // Obsidian's CSP blocks the CDN <script src> bd's --html output ships with.
-  loader: { ".txt": "text" },
+  // NOTE: @viz-js/viz (the Graphviz WASM engine behind the dependency-graph
+  // tab) embeds its .wasm inside its own JS bundle, so it must stay INTERNAL —
+  // bundling it is what makes the graph work with no network call, which
+  // Obsidian's CSP requires.
   external: [
     "obsidian",
     "electron",

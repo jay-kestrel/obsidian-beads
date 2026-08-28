@@ -393,22 +393,28 @@ export async function bdComments(
 	}
 }
 
-// `bd graph --html --all` lays out every issue in the repo, which can take a
-// while on a large graph (observed >2min on a ~150-issue repo) — give it a
-// much longer budget than the default 15s instead of failing fast.
+// `bd graph` walks the whole dependency closure, which is slow even when
+// scoped to one epic (observed ~75s for a ~900-node closure, and worse with
+// `--all`) — give it a much longer budget than the default 15s instead of
+// failing fast.
 const GRAPH_TIMEOUT_MS = 120_000;
 
 /**
- * `bd graph --html [--all] [-- id]` — bd's own self-contained, interactive D3
- * dependency graph as an HTML string. `id` scopes to one issue/epic (fast);
- * `all` lays out the whole repo (can be slow — see GRAPH_TIMEOUT_MS). Not
- * cached: a graph render is a deliberate, occasional action, not a hot path.
+ * `bd graph --dot [--all] [-- id]` — the dependency graph in Graphviz DOT
+ * format. This is the same layered model as bd's terminal view (one
+ * `rank=same` sub-graph per dependency layer), with bd's status palette
+ * already baked into each node's `fillcolor`/`fontcolor`, and node ids that
+ * are literally the bd issue ids. We run it through a vendored Graphviz WASM
+ * build to get a clean layered SVG — see graph.ts.
+ *
+ * `id` scopes to one issue/epic; `all` lays out the whole repo. Not cached: a
+ * graph render is a deliberate, occasional action, not a hot path.
  */
-export async function bdGraphHtml(
+export async function bdGraphDot(
 	opts: BdOptions,
 	target: { id?: string; all?: boolean },
 ): Promise<string> {
-	const args = ["graph", "--html"];
+	const args = ["graph", "--dot"];
 	if (target.all) args.push("--all");
 	if (target.id) args.push("--", target.id);
 	const { stdout } = await run(args, { ...opts, timeoutMs: GRAPH_TIMEOUT_MS });
