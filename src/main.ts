@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { FSWatcher, watch, existsSync } from "fs";
 import { join } from "path";
 import {
@@ -12,9 +12,15 @@ import {
 import { BeadsView } from "./view";
 import { BeadEditorView } from "./editor";
 import { BeadsGraphView, GraphState } from "./graph";
-import { VIEW_TYPE_BEADS, VIEW_TYPE_BEADS_EDITOR, VIEW_TYPE_BEADS_GRAPH } from "./types";
+import {
+	BeadIssue,
+	VIEW_TYPE_BEADS,
+	VIEW_TYPE_BEADS_EDITOR,
+	VIEW_TYPE_BEADS_GRAPH,
+} from "./types";
 import { bdReadyCount, invalidateReadCache } from "./bd";
 import { registerBeadsCodeBlock } from "./codeblock";
+import { showHarnessMenu } from "./harness";
 
 export default class BeadsPlugin extends Plugin {
 	settings!: BeadsSettings;
@@ -162,6 +168,28 @@ export default class BeadsPlugin extends Plugin {
 			state: state as Record<string, unknown>,
 		});
 		await workspace.revealLeaf(leaf);
+	}
+
+	/**
+	 * "Work the bead": offer the configured CLI harnesses for `issue`, then show
+	 * the generated command for the user to copy and run themselves. Requires a
+	 * real click (the `MouseEvent` anchors the menu) — nothing here ever fires
+	 * on its own, and nothing here starts the agent.
+	 */
+	workBead(issue: BeadIssue, event: MouseEvent): void {
+		const opts = activeOptions(this.settings);
+		const project = activeProject(this.settings);
+		if (!opts || !project) {
+			new Notice("Beads: add a project and select it first.");
+			return;
+		}
+		showHarnessMenu(this.app, event, issue, {
+			opts,
+			projectName: project.name || project.path,
+			promptTemplate: this.settings.promptTemplate,
+			terminalCommand: this.settings.terminalCommand,
+			harnesses: this.settings.harnesses,
+		});
 	}
 
 	/** Open a blank editor tab to create a new bead (same surface as editing). */

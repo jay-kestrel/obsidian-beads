@@ -26,6 +26,12 @@ who tracks work in `bd` and lives in Obsidian.
 - ⚡ **Quick capture** — *Beads: Capture a bead* (or the `+` in the pane) opens a box:
   type a title and press Enter for the fast path, or set type / priority / description
   first (`bd create`).
+- 🤖 **Work the bead** — hand one bead to a CLI coding agent. Pick a harness you've
+  defined (Claude Code, Codex, anything with a command line), and the plugin builds a
+  prompt from the bead's fields *and its dependency context* and shows you the exact
+  command. **Nothing runs from Obsidian**: you copy the command, open a terminal (one
+  button does that at the project root), paste, and press Enter yourself. See
+  [Security](#security).
 - 📄 **Live `beads` code blocks** — embed a query in any note (Dataview-style) and get
   the same clickable rows inline. See [Embedding queries](#embedding-queries-in-notes).
 - 🔢 **Status-bar count** — an ambient `● N ready` even when the pane is closed.
@@ -107,6 +113,9 @@ a timer — and share a global read cache, so many blocks won't hammer `bd`.
 | Project root | *(empty)* | Absolute path to the directory containing `.beads/`. |
 | `bd` binary path | `bd` | Path to the `bd` executable. If not found, use the full path from `which bd` (see Troubleshooting). |
 | Auto-refresh interval | `30` | Seconds between refreshes (`0` disables). |
+| Harnesses | Claude Code, Codex CLI *(examples)* | Named CLI coding agents. Each has a command template using `{prompt}` (the generated prompt, shell-quoted) and `{model}`. The shipped two are editable examples, not a maintained list of vendor flags — fix them to match the CLI you actually have. |
+| Prompt template | *(built in)* | The generated prompt. Placeholders: `{id}` `{title}` `{description}` `{status}` `{priority}` `{type}` `{labels}` `{assignee}` `{project}` `{blockers}` `{dependents}`. Clear the box to restore the default. |
+| Terminal launch command | `open -a Terminal {dir}` (macOS) | argv for opening your terminal at the project root. Split on spaces and run **without a shell**; `{dir}` is substituted per-token, so a path with spaces stays one argument. |
 
 ## Troubleshooting
 
@@ -135,6 +144,12 @@ a timer — and share a global read cache, so many blocks won't hammer `bd`.
   render through Obsidian's own `MarkdownRenderer` — the same sanitized path as any note.
   Data-controlled values are also passed after a `--` sentinel (or as `--flag=value`) so
   they can't be reparsed as `bd` flags.
+- **Work the bead never runs your coding agent.** It builds the command, shows it
+  verbatim, and copies it to the clipboard; you paste it and press Enter. There is no
+  auto-run path. The generated prompt is POSIX single-quoted, so a bead description
+  containing `; rm -rf ~` pastes as inert text inside one argument.
+- The one process **Work the bead** can start is your terminal emulator, from an explicit
+  button click, via `execFile` with an argv array (no shell) — same rule as `bd`.
 - The plugin runs `bd` against whatever `.beads/` your project root points at (including
   an auto-detected vault-local one). It never executes anything *from* the dataset — but
   that means you trust `bd`'s own parsing of that database, as with any `bd` invocation.

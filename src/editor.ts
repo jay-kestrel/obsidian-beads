@@ -199,6 +199,16 @@ export class BeadEditorView extends ItemView {
 			this.saveBtn.disabled = true;
 			this.saveBtn.onclick = () => void this.save();
 		} else {
+			// "Work the bead" acts on the SAVED bead (it re-reads via bd), so it
+			// sits alongside Revert/Save rather than pretending to include
+			// unsaved edits.
+			const workBtn = actions.createEl("button", {
+				cls: "beads-work-btn",
+				text: "Work the bead",
+			});
+			workBtn.onclick = (e) => {
+				if (this.issue) this.plugin.workBead(this.issue, e);
+			};
 			this.revertBtn = actions.createEl("button", { text: "Revert" });
 			this.saveBtn = actions.createEl("button", { cls: "mod-cta", text: "Save" });
 			this.saveBtn.disabled = true;
