@@ -282,12 +282,19 @@ export class BeadsGraphView extends ItemView {
 		let moved = false;
 		let last = { x: 0, y: 0 };
 		let downAt = { x: 0, y: 0 };
+		// The node (if any) under the pointer at press time. Captured *before*
+		// setPointerCapture, because once the host has capture the UA retargets
+		// the synthesized `click` event's `target` to the capturing element
+		// (host) regardless of what's visually under the cursor — so the click
+		// handler can't hit-test itself and must use this instead.
+		let downNode: Element | null = null;
 		this.registerDomEvent(host, "pointerdown", (e: PointerEvent) => {
 			if (e.button !== 0) return;
 			dragging = true;
 			moved = false;
 			downAt = { x: e.clientX, y: e.clientY };
 			last = this.toUser(svg, e.clientX, e.clientY);
+			downNode = (e.target as Element | null)?.closest?.("g.node") ?? null;
 			host.setPointerCapture(e.pointerId);
 		});
 		this.registerDomEvent(host, "pointermove", (e: PointerEvent) => {
@@ -309,8 +316,9 @@ export class BeadsGraphView extends ItemView {
 
 		this.registerDomEvent(host, "click", (e: MouseEvent) => {
 			if (moved) return; // that was a pan, not a click
-			const target = e.target as Element | null;
-			const g = target?.closest?.("g.node");
+			// Use the node hit-tested at pointerdown, not e.target: pointer
+			// capture retargets the click event's target to `host`.
+			const g = downNode;
 			if (!g) {
 				this.closePopup();
 				return;
