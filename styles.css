@@ -663,6 +663,12 @@ select.beads-prop-input {
 	font-size: 1.1em;
 	line-height: 1;
 }
+.beads-graph-popup-status {
+	margin: 6px 0 0 calc(8px + var(--size-4-2));
+}
+.beads-graph-popup-status select {
+	font-size: var(--font-ui-smaller);
+}
 .beads-graph-popup-desc {
 	margin: 8px 0 10px;
 	color: var(--text-muted);
@@ -672,8 +678,12 @@ select.beads-prop-input {
 	max-height: 160px;
 	overflow-y: auto;
 }
-.beads-graph-popup button.mod-cta {
-	width: 100%;
+.beads-graph-popup-actions {
+	display: flex;
+	gap: 6px;
+}
+.beads-graph-popup-actions button {
+	flex: 1 1 auto;
 }
 
 /* --- Work the bead ---------------------------------------------------- */
