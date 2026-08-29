@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import type BeadsPlugin from "./main";
 import { activeOptions } from "./settings";
-import { BeadIssue, VIEW_TYPE_BEADS } from "./types";
+import { BeadIssue, PRIORITIES, VIEW_TYPE_BEADS } from "./types";
 import {
 	bdReady,
 	bdBlocked,
@@ -55,6 +55,69 @@ function byPriority(issues: BeadIssue[]): BeadIssue[] {
 }
 
 /**
+ * Client-side filter state for the active tab's list. Empty string = no
+ * constraint on that field. Kept simple on purpose: this is a plain
+ * "every selected field must match" AND — bd's own query language already
+ * handles real boolean expressions (see `bd query --help` / codeblock.ts's
+ * `query:` directive), so there's no reason to reinvent that here for four
+ * dropdowns worth of state.
+ */
+interface FilterState {
+	label: string;
+	assignee: string;
+	priority: string;
+	type: string;
+}
+
+function emptyFilters(): FilterState {
+	return { label: "", assignee: "", priority: "", type: "" };
+}
+
+function hasActiveFilter(f: FilterState): boolean {
+	return f.label !== "" || f.assignee !== "" || f.priority !== "" || f.type !== "";
+}
+
+/** The assignee shown/filtered on: `assignee` if set, else `owner`. */
+function issueAssignee(issue: BeadIssue): string {
+	return issue.assignee || issue.owner || "";
+}
+
+function matchesFilters(issue: BeadIssue, f: FilterState): boolean {
+	if (f.label && !(issue.labels ?? []).includes(f.label)) return false;
+	if (f.assignee && issueAssignee(issue) !== f.assignee) return false;
+	if (f.priority && String(issue.priority ?? 2) !== f.priority) return false;
+	if (f.type && issue.issue_type !== f.type) return false;
+	return true;
+}
+
+/**
+ * Distinct values present in the currently-loaded issue set, for populating
+ * the filter dropdowns. Deliberately scoped to what's loaded (not a separate
+ * bd call to enumerate every label/assignee in the project) — the pane already
+ * paginates, so "options visible right now" is the honest set to offer; a
+ * value that hasn't loaded yet naturally appears once "Load more" brings it in.
+ */
+function distinctOptions(issues: BeadIssue[]) {
+	const labels = new Set<string>();
+	const assignees = new Set<string>();
+	const types = new Set<string>();
+	const priorities = new Set<number>();
+	for (const issue of issues) {
+		for (const l of issue.labels ?? []) labels.add(l);
+		const a = issueAssignee(issue);
+		if (a) assignees.add(a);
+		if (issue.issue_type) types.add(issue.issue_type);
+		priorities.add(issue.priority ?? 2);
+	}
+	return {
+		labels: Array.from(labels).sort(),
+		assignees: Array.from(assignees).sort(),
+		types: Array.from(types).sort(),
+		priorities: Array.from(priorities).sort((a, b) => a - b),
+	};
+}
+
+/**
  * Tabbed, lazily-loaded pane. Only the active tab hits `bd` (plus one cheap
  * `bd status` for the tab counts), and each tab paginates with "Load more" —
  * so opening the pane is fast even with thousands of closed issues.
@@ -66,6 +129,8 @@ export class BeadsView extends ItemView {
 	private epics: EpicsState = emptyEpicsState();
 	private baseState: "ok" | "no-root" | "no-db" = "no-root";
 	private loadSeq = 0;
+	/** Label/assignee/priority/type filter for the active tab's list (Epics tab excluded). */
+	private filters: FilterState = emptyFilters();
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -126,6 +191,7 @@ export class BeadsView extends ItemView {
 			this.tabs[t.key].loaded = false;
 			this.tabs[t.key].limit = PAGE;
 		}
+		this.filters = emptyFilters();
 		// Keep which epics are open across a refresh; drop their cached children
 		// so an expanded epic re-reads from bd instead of showing stale rows.
 		this.epics.loaded = false;
@@ -270,6 +336,7 @@ export class BeadsView extends ItemView {
 	private async switchTab(key: string): Promise<void> {
 		if (this.active === key) return;
 		this.active = key;
+		this.filters = emptyFilters();
 		const loaded = key === EPICS_TAB ? this.epics.loaded : this.tabs[key].loaded;
 		if (loaded) this.render(); // cached → instant
 		else await this.loadTab(key);
@@ -309,6 +376,78 @@ export class BeadsView extends ItemView {
 			option.selected = project.id === s.activeProjectId;
 		}
 		select.onchange = () => void this.plugin.setActiveProject(select.value);
+	}
+
+	/**
+	 * Compact filter bar for the active tab's list: label / assignee / priority
+	 * / type, each populated from the distinct values in the currently-loaded
+	 * issue set (not a fixed list, not a separate bd call). Client-side, not a
+	 * `bd query` expression — see the module-level `FilterState` doc for why.
+	 */
+	private renderFilterBar(body: HTMLElement, issues: BeadIssue[]): void {
+		const opts = distinctOptions(issues);
+		const bar = body.createDiv({ cls: "beads-filterbar" });
+
+		const addSelect = (
+			label: string,
+			value: string,
+			choices: { value: string; text: string }[],
+			onChange: (v: string) => void,
+		): void => {
+			const select = bar.createEl("select", {
+				cls: "dropdown beads-filter-select",
+				attr: { "aria-label": label },
+			});
+			const allOption = select.createEl("option", { value: "", text: label });
+			allOption.selected = value === "";
+			for (const c of choices) {
+				const option = select.createEl("option", { value: c.value, text: c.text });
+				option.selected = c.value === value;
+			}
+			select.onchange = () => {
+				onChange(select.value);
+				this.render();
+			};
+		};
+
+		addSelect(
+			"All labels",
+			this.filters.label,
+			opts.labels.map((l) => ({ value: l, text: l })),
+			(v) => (this.filters.label = v),
+		);
+		addSelect(
+			"All authors",
+			this.filters.assignee,
+			opts.assignees.map((a) => ({ value: a, text: a })),
+			(v) => (this.filters.assignee = v),
+		);
+		addSelect(
+			"All priorities",
+			this.filters.priority,
+			opts.priorities.map((p) => ({
+				value: String(p),
+				text: PRIORITIES.find((x) => x.value === p)?.label ?? `P${p}`,
+			})),
+			(v) => (this.filters.priority = v),
+		);
+		addSelect(
+			"All types",
+			this.filters.type,
+			opts.types.map((t) => ({ value: t, text: t })),
+			(v) => (this.filters.type = v),
+		);
+
+		if (hasActiveFilter(this.filters)) {
+			const clear = bar.createEl("button", {
+				cls: "beads-filter-clear",
+				text: "Clear filters",
+			});
+			clear.onclick = () => {
+				this.filters = emptyFilters();
+				this.render();
+			};
+		}
 	}
 
 	private render(): void {
@@ -392,8 +531,19 @@ export class BeadsView extends ItemView {
 			return;
 		}
 
+		this.renderFilterBar(body, tab.issues);
+		const visible = tab.issues.filter((i) => matchesFilters(i, this.filters));
+
+		if (visible.length === 0) {
+			body.createDiv({
+				cls: "beads-empty",
+				text: "No issues match the current filters.",
+			});
+			return;
+		}
+
 		const list = body.createDiv({ cls: "beads-list" });
-		for (const issue of tab.issues) {
+		for (const issue of visible) {
 			renderIssueRow(list, issue, {
 				onOpen: (i) => this.openBead(i),
 				showDeps: this.active === "blocked",
