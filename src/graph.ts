@@ -290,6 +290,11 @@ export class BeadsGraphView extends ItemView {
 		let downNode: Element | null = null;
 		this.registerDomEvent(host, "pointerdown", (e: PointerEvent) => {
 			if (e.button !== 0) return;
+			// Don't engage pan/capture for presses inside the popup: setPointerCapture
+			// retargets the *click* event's target to `host` for the rest of this
+			// gesture (the same quirk that once broke node clicks), which would
+			// stop it from ever reaching a button's own onclick — e.g. "Open".
+			if (this.popupEl && (e.target as Element | null)?.closest(".beads-graph-popup")) return;
 			dragging = true;
 			moved = false;
 			downAt = { x: e.clientX, y: e.clientY };
