@@ -67,14 +67,18 @@ interface FilterState {
 	assignee: string;
 	priority: string;
 	type: string;
+	/** Free-text substring match against id + title, case-insensitive. */
+	search: string;
 }
 
 function emptyFilters(): FilterState {
-	return { label: "", assignee: "", priority: "", type: "" };
+	return { label: "", assignee: "", priority: "", type: "", search: "" };
 }
 
 function hasActiveFilter(f: FilterState): boolean {
-	return f.label !== "" || f.assignee !== "" || f.priority !== "" || f.type !== "";
+	return (
+		f.label !== "" || f.assignee !== "" || f.priority !== "" || f.type !== "" || f.search.trim() !== ""
+	);
 }
 
 /** The assignee shown/filtered on: `assignee` if set, else `owner`. */
@@ -87,6 +91,8 @@ function matchesFilters(issue: BeadIssue, f: FilterState): boolean {
 	if (f.assignee && issueAssignee(issue) !== f.assignee) return false;
 	if (f.priority && String(issue.priority ?? 2) !== f.priority) return false;
 	if (f.type && issue.issue_type !== f.type) return false;
+	const q = f.search.trim().toLowerCase();
+	if (q && !issue.id.toLowerCase().includes(q) && !issue.title.toLowerCase().includes(q)) return false;
 	return true;
 }
 
@@ -387,6 +393,20 @@ export class BeadsView extends ItemView {
 	private renderFilterBar(body: HTMLElement, issues: BeadIssue[]): void {
 		const opts = distinctOptions(issues);
 		const bar = body.createDiv({ cls: "beads-filterbar" });
+
+		const search = bar.createEl("input", {
+			cls: "beads-filter-search",
+			attr: { type: "search", placeholder: "Search…" },
+		});
+		search.value = this.filters.search;
+		search.oninput = () => {
+			const cursor = search.selectionStart;
+			this.filters.search = search.value;
+			this.render(); // rebuilds the whole pane, including this input — restore focus/cursor below
+			const restored = this.contentEl.querySelector<HTMLInputElement>(".beads-filter-search");
+			restored?.focus();
+			if (restored && cursor !== null) restored.setSelectionRange(cursor, cursor);
+		};
 
 		const addSelect = (
 			label: string,

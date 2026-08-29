@@ -95,13 +95,21 @@
 	color: var(--text-muted);
 }
 
-/* Filter bar — label/author/priority/type, one small select each. */
+/* Filter bar — search, then label/author/priority/type, one small control each. */
 .beads-filterbar {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 4px;
 	padding: 2px 8px 6px;
+}
+.beads-filter-search {
+	flex: 1 1 120px;
+	min-width: 80px;
+	height: auto;
+	padding: 3px 8px;
+	font-size: var(--font-ui-smaller);
+	box-shadow: none;
 }
 .beads-filter-select {
 	height: auto;
