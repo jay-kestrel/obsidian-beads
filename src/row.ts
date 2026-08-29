@@ -16,6 +16,8 @@ export interface RowHandlers {
 	showDeps?: boolean;
 	/** Epic rows only: click-through to that epic's dependency graph. */
 	onGraph?: (issue: BeadIssue) => void;
+	/** Hand the bead to a CLI coding agent (menu anchored on the click). */
+	onWork?: (issue: BeadIssue, event: MouseEvent) => void;
 }
 
 /** A small colored priority dot (native-restrained) with the label on hover. */
@@ -55,6 +57,18 @@ export function renderIssueRow(
 			cls: "beads-deps",
 			text: `⛓ ${issue.dependency_count}`,
 		});
+	}
+
+	if (handlers.onWork && issue.status !== "closed") {
+		const workBtn = row.createEl("button", {
+			cls: "clickable-icon beads-work-btn",
+			attr: { "aria-label": "Work the bead", title: "Work the bead" },
+		});
+		setIcon(workBtn, "bot");
+		workBtn.onclick = (e) => {
+			e.stopPropagation(); // don't also open the bead editor
+			handlers.onWork?.(issue, e);
+		};
 	}
 
 	if (handlers.onGraph && issue.issue_type === "epic") {

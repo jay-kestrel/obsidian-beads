@@ -398,6 +398,7 @@ export class BeadsView extends ItemView {
 				onOpen: (i) => this.openBead(i),
 				showDeps: this.active === "blocked",
 				onGraph: (i) => void this.plugin.openGraph({ id: i.id }),
+				onWork: (i, e) => this.plugin.workBead(i, e),
 			});
 		}
 

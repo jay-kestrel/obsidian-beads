@@ -637,3 +637,59 @@ select.beads-prop-input {
 .beads-graph-popup button.mod-cta {
 	width: 100%;
 }
+
+/* --- Work the bead ---------------------------------------------------- */
+
+/* Row affordance: hidden until the row is hovered/focused, like the graph
+   button, so the list stays quiet. */
+.beads-row .beads-work-btn {
+	flex: 0 0 auto;
+	opacity: 0;
+}
+.beads-row:hover .beads-work-btn,
+.beads-row .beads-work-btn:focus-visible {
+	opacity: 1;
+}
+
+.beads-work-note {
+	margin-bottom: var(--size-4-3);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+.beads-work-section {
+	margin: var(--size-4-3) 0 var(--size-4-1);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+.beads-work-command,
+.beads-work-prompt {
+	width: 100%;
+	resize: vertical;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.beads-work-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	margin-top: var(--size-4-3);
+}
+.beads-work-term {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-4-1);
+}
+
+.beads-settings-harness .setting-item-control input[type="text"] {
+	min-width: 0;
+}
+.beads-settings-template {
+	width: 100%;
+	min-height: 200px;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}

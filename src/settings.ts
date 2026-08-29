@@ -2,6 +2,13 @@ import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import { basename } from "path";
 import type BeadsPlugin from "./main";
 import { bdVersion, BdOptions } from "./bd";
+import {
+	HarnessProfile,
+	DEFAULT_PROMPT_TEMPLATE,
+	defaultHarnesses,
+	defaultTerminalCommand,
+	newHarnessId,
+} from "./harness";
 
 /** One bd-tracked project: a display name plus the directory holding `.beads/`. */
 export interface BeadsProject {
@@ -21,6 +28,12 @@ export interface BeadsSettings {
 	bdPath: string;
 	/** Auto-refresh interval in seconds (0 = disabled). */
 	refreshIntervalSec: number;
+	/** CLI coding-agent harnesses offered by "Work the bead". User-owned. */
+	harnesses: HarnessProfile[];
+	/** Template for the generated agent prompt (see harness.ts placeholders). */
+	promptTemplate: string;
+	/** argv template for opening a terminal at `{dir}`. No shell is used. */
+	terminalCommand: string;
 }
 
 /** Shape of persisted data from before multi-project support. */
@@ -33,6 +46,9 @@ export const DEFAULT_SETTINGS: BeadsSettings = {
 	activeProjectId: "",
 	bdPath: "bd",
 	refreshIntervalSec: 30,
+	harnesses: [],
+	promptTemplate: DEFAULT_PROMPT_TEMPLATE,
+	terminalCommand: "",
 };
 
 export function newProjectId(): string {
@@ -58,6 +74,12 @@ export function migrateSettings(
 ): BeadsSettings {
 	const s: BeadsSettings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
 	s.projects = Array.isArray(s.projects) ? s.projects : [];
+
+	// Seed the example harnesses only on first sight of the field, so a user
+	// who deliberately deleted them doesn't get them back on every reload.
+	s.harnesses = Array.isArray(data?.harnesses) ? s.harnesses : defaultHarnesses();
+	if (!s.promptTemplate?.trim()) s.promptTemplate = DEFAULT_PROMPT_TEMPLATE;
+	if (!s.terminalCommand?.trim()) s.terminalCommand = defaultTerminalCommand();
 
 	const legacyRoot = data?.projectRoot?.trim();
 	if (legacyRoot && s.projects.length === 0) {
@@ -193,6 +215,101 @@ export class BeadsSettingTab extends PluginSettingTab {
 						this.plugin.restartRefreshTimer();
 					}),
 			);
+
+		new Setting(containerEl).setName("Work the bead").setHeading();
+
+		containerEl.createDiv({
+			cls: "beads-settings-empty",
+			text: 'Harnesses are yours to define — the plugin never runs them. Picking one shows the command it would run; you copy it and press Enter in your own terminal. Use {prompt} where the generated prompt goes and {model} for the model field.',
+		});
+
+		for (const harness of s.harnesses) {
+			const setting = new Setting(containerEl)
+				.addText((text) =>
+					text
+						.setPlaceholder("Name")
+						.setValue(harness.name)
+						.onChange(async (value) => {
+							harness.name = value.trim();
+							await this.plugin.saveSettings();
+						}),
+				)
+				.addText((text) =>
+					text
+						.setPlaceholder("mytool --model {model} {prompt}")
+						.setValue(harness.command)
+						.onChange(async (value) => {
+							harness.command = value.trim();
+							await this.plugin.saveSettings();
+						}),
+				)
+				.addText((text) =>
+					text
+						.setPlaceholder("model (optional)")
+						.setValue(harness.model)
+						.onChange(async (value) => {
+							harness.model = value.trim();
+							await this.plugin.saveSettings();
+						}),
+				)
+				.addExtraButton((btn) =>
+					btn
+						.setIcon("trash")
+						.setTooltip("Remove harness")
+						.onClick(async () => {
+							s.harnesses = s.harnesses.filter((h) => h.id !== harness.id);
+							await this.plugin.saveSettings();
+							this.display();
+						}),
+				);
+			setting.settingEl.addClass("beads-settings-harness");
+		}
+
+		new Setting(containerEl).addButton((btn) =>
+			btn.setButtonText("Add harness").onClick(async () => {
+				s.harnesses.push({
+					id: newHarnessId(),
+					name: `Harness ${String(s.harnesses.length + 1)}`,
+					command: "{prompt}",
+					model: "",
+				});
+				await this.plugin.saveSettings();
+				this.display();
+			}),
+		);
+
+		new Setting(containerEl)
+			.setName("Prompt template")
+			.setDesc(
+				"Placeholders: {id} {title} {description} {status} {priority} {type} {labels} {assignee} {project} {blockers} {dependents}. Clear the box to restore the default.",
+			)
+			.addTextArea((text) => {
+				text.inputEl.rows = 12;
+				text.inputEl.addClass("beads-settings-template");
+				text
+					.setValue(s.promptTemplate)
+					.onChange(async (value) => {
+						s.promptTemplate = value || DEFAULT_PROMPT_TEMPLATE;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Terminal launch command")
+			.setDesc(
+				"Run when you click “Open terminal” in the Work-the-bead preview. Split on spaces and run without a shell; {dir} is replaced with the project path (quoting is not supported — the substitution is already one argument).",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder(defaultTerminalCommand())
+					.setValue(s.terminalCommand)
+					.onChange(async (value) => {
+						s.terminalCommand = value.trim() || defaultTerminalCommand();
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl).setName("Diagnostics").setHeading();
 
 		new Setting(containerEl)
 			.setName("Test connection")
